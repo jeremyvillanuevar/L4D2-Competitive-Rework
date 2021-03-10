@@ -35,6 +35,7 @@ enum L4D2Team:
 }
 
 // Plugin Cvars
+Handle l4d_ready_enabled;
 Handle l4d_ready_disable_spawns;
 Handle l4d_ready_cfg_name;
 Handle l4d_ready_survivor_freeze;
@@ -43,6 +44,7 @@ Handle l4d_ready_enable_sound;
 Handle l4d_ready_delay;
 Handle l4d_ready_chuckle;
 Handle l4d_ready_live_sound;
+Handle l4d_ready_enable_oneplayer;
 Handle g_hVote;
 
 //AFK?!
@@ -73,6 +75,9 @@ char liveSound[256];
 bool blockSecretSpam[MAXPLAYERS + 1];
 bool bHostName;
 
+//new cvars
+int g_ienableReadyOnePlayer = 0;
+
 char countdownSound[MAX_SOUNDS][]=
 {
 	"buttons\\blip1.wav",
@@ -96,7 +101,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 public void OnPluginStart()
 {
 	
-	CreateConVar("l4d_ready_enabled", "1", "This cvar doesn't do anything, but if it is 0 the logger wont log this game.", 0, true, 0.0, true, 1.0);
+	l4d_ready_enabled = CreateConVar("l4d_ready_enabled", "1", "This cvar doesn't do anything, but if it is 0 the logger wont log this game.", 0, true, 0.0, true, 1.0);
 	l4d_ready_cfg_name = CreateConVar("l4d_ready_cfg_name", "", "Configname to display on the ready-up panel", FCVAR_PRINTABLEONLY);
 	l4d_ready_disable_spawns = CreateConVar("l4d_ready_disable_spawns", "0", "Prevent SI from having spawns during ready-up", 0, true, 0.0, true, 1.0);
 	l4d_ready_survivor_freeze = CreateConVar("l4d_ready_survivor_freeze", "1", "Freeze the survivors during ready-up.  When unfrozen they are unable to leave the saferoom but can move freely inside", 0, true, 0.0, true, 1.0);
@@ -104,8 +109,10 @@ public void OnPluginStart()
 	l4d_ready_delay = CreateConVar("l4d_ready_delay", "3", "Number of seconds to count down before the round goes live.", 0, true, 0.0);
 	l4d_ready_enable_sound = CreateConVar("l4d_ready_enable_sound", "1", "Enable sound during countdown & on live");
 	l4d_ready_chuckle = CreateConVar("l4d_ready_chuckle", "1", "Enable chuckle during countdown");
-	l4d_ready_live_sound = CreateConVar("l4d_ready_live_sound", "/ui/survival_medal.wav", "The sound that plays when a round goes live");
+	l4d_ready_live_sound = CreateConVar("l4d_ready_live_sound", "ui\\survival_medal.wav", "The sound that plays when a round goes live");
+	l4d_ready_enable_oneplayer = CreateConVar("l4d_ready_enable_oneplayer", "0", "Enabling enable readyup to stop the round if there is just one player connected", 0, true, 0.0, true, 1.0);
 	HookConVarChange(l4d_ready_survivor_freeze, SurvFreezeChange);
+	HookConVarChange(l4d_ready_enable_oneplayer, changedConvars);
 
 	HookEvent("round_start", RoundStart_Event);
 	HookEvent("player_team", PlayerTeam_Event);
@@ -156,6 +163,8 @@ public void OnPluginStart()
 
 	LoadTranslations("common.phrases");
 	CreateTimer(0.2, CheckStuff);
+	AutoExecConfig(true, "l4d_ready");
+	
 }
 
 public Action CheckStuff(Handle timer)
@@ -614,6 +623,13 @@ public void SurvFreezeChange(Handle convar, const char[] oldValue, const char[] 
 	SetTeamFrozen(L4D2Team_Survivor, GetConVarBool(convar));
 }
 
+
+public void changedConvars(Handle convar, const char[] oldValue, const char[] newValue)
+{
+	g_ienableReadyOnePlayer = GetConVarInt(convar);
+}
+
+
 public Action L4D_OnFirstSurvivorLeftSafeArea(int client)
 {
 	if (inReadyUp)
@@ -727,18 +743,35 @@ void UpdatePanel()
 	menuPanel = CreatePanel();
 
 	//Draw That Stuff
-	char ServerBuffer[128];
+	char ServerBuffer[350];
 	char ServerName[64];
 	char cfgName[32];
 
 	// Support for Server_Namer.smx and Normal Hostname.
 	if (bHostName) GetConVarString(FindConVar("sn_main_name"), ServerName, sizeof(ServerName));
 	else GetConVarString(FindConVar("hostname"), ServerName, sizeof(ServerName));
-	GetConVarString((l4d_ready_cfg_name), cfgName, sizeof(cfgName));
-	Format(ServerBuffer, sizeof(ServerBuffer), "Xtrememod 1.7.2 (By %s)\n-------------------------------------\nLocalHost Argentina\n▸ Slots: %d/%d\n▸ Config: server.cfg", ServerName, GetSeriousClientCount(), GetConVarInt(FindConVar("sv_maxplayers")));
+	GetConVarString(l4d_ready_cfg_name, cfgName, sizeof(cfgName));
+	DrawPanelText(menuPanel, "============================\n");
+	Format(ServerBuffer, sizeof(ServerBuffer), "▸ %s \n", ServerName);
 	DrawPanelText(menuPanel, ServerBuffer);
-	DrawPanelText(menuPanel, "============================\nEste servidor esta protegido\nCon SourceMod Anti-Cheats\nSeguro con VAC anti-trampas!\n============================");
-
+	DrawPanelText(menuPanel, "============================\n");
+	Format(ServerBuffer, sizeof(ServerBuffer), "▸ Amigos: %d/%d\n", GetSeriousClientCount(), GetConVarInt(FindConVar("sv_maxplayers")));
+	DrawPanelText(menuPanel, ServerBuffer);
+	if (StrEqual(cfgName,""))
+	{
+		Format(ServerBuffer, sizeof(ServerBuffer), "▸ Config: %s\n", cfgName);
+		DrawPanelText(menuPanel, ServerBuffer);
+	}
+	Format(ServerBuffer, sizeof(ServerBuffer), "▸ Bienvenido\n");
+	DrawPanelText(menuPanel, ServerBuffer);
+	if (g_ienableReadyOnePlayer==1)
+		if (GetSeriousClientCount()==1)
+		{
+			DrawPanelText(menuPanel, "La partida iniciará porque solo hay un jugador presente.");
+			CreateTimer(27.0, checkReadyTimer, _, TIMER_FLAG_NO_MAPCHANGE);	
+		}
+	DrawPanelText(menuPanel, "============================\n");
+	//DrawPanelText(menuPanel, " ");	
 	char nameBuf[MAX_NAME_LENGTH*2];
 	char authBuffer[64];
 	bool caster;
@@ -857,16 +890,13 @@ void InitiateReadyUp()
 	UpdatePanel();
 	CreateTimer(1.0, MenuRefresh_Timer, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
 	CreateTimer(4.0, MenuCmd_Timer, _, TIMER_REPEAT|TIMER_FLAG_NO_MAPCHANGE);
-
 	inReadyUp = true;
 	inLiveCountdown = false;
 	readyCountdownTimer = INVALID_HANDLE;
-
 	if (GetConVarBool(l4d_ready_disable_spawns))
 	{
 		SetConVarBool(director_no_specials, true);
-	}
-
+	}	
 	SetConVarFlags(sv_infinite_primary_ammo, GetConVarFlags(sv_infinite_primary_ammo) & ~FCVAR_NOTIFY);
 	SetConVarBool(sv_infinite_primary_ammo, true);
 	SetConVarFlags(sv_infinite_primary_ammo, GetConVarFlags(sv_infinite_primary_ammo) | FCVAR_NOTIFY);
@@ -877,6 +907,16 @@ void InitiateReadyUp()
 	L4D2_CTimerStart(L4D2CT_VersusStartTimer, 99999.9);
 	return;
 }
+
+public Action checkReadyTimer(Handle timer)
+{	
+	if (inReadyUp)
+	{
+		InitiateLiveCountdown();
+	}
+	return Plugin_Handled;
+}
+
 
 void InitiateLive(bool real = true)
 {
@@ -998,6 +1038,8 @@ bool CheckFullReady()
 			}
 		}
 	}
+	
+	
 	// Non-Versus Mode!
 	//if we're running a versus game,
 	char GameMode[32];
@@ -1078,7 +1120,7 @@ int GetRealClientCount()
 		if (IsClientConnected(i))
 		{ 
 			if (!IsClientInGame(i)) clients++;
-			else if (!IsFakeClient(i) && GetClientTeam(i) == L4D2Team_Survivor) clients++;
+			else if (!IsFakeClient(i) && (view_as<L4D2Team>(GetClientTeam(i)) == L4D2Team_Survivor)) clients++;
 		}
 	}
 	return clients;
@@ -1105,7 +1147,7 @@ int GetSIClientCount()
 	int clients = 0;
 	for (int i = 1; i <= MaxClients; i++)
 	{
-		if (IsClientInGame(i) && GetClientTeam(i) == L4D2Team_Infected)
+		if (IsClientInGame(i) && (view_as<L4D2Team>(GetClientTeam(i)) == L4D2Team_Infected))
 		{
 			//if (IsPlayerAlive(i))
 			//{
