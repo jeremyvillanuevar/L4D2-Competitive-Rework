@@ -44,7 +44,6 @@ Handle l4d_ready_enable_sound;
 Handle l4d_ready_delay;
 Handle l4d_ready_chuckle;
 Handle l4d_ready_live_sound;
-Handle l4d_ready_enable_oneplayer;
 Handle g_hVote;
 
 //AFK?!
@@ -76,8 +75,14 @@ bool blockSecretSpam[MAXPLAYERS + 1];
 bool bHostName;
 
 //new cvars
-int g_ienableReadyOnePlayer = 0;
+ConVar l4d_ready_votepass_oneplayer;
+ConVar l4d_ready_vote_oneplayerbyteam;
+ConVar l4d_ready_vote_percent;
 
+int g_iCvar_VotePassOnePlayer;
+int g_iCvar_VoteOnePlayerbyTeam;
+float	g_fCvar_VotePercent;
+	
 char countdownSound[MAX_SOUNDS][]=
 {
 	"buttons\\blip1.wav",
@@ -110,9 +115,13 @@ public void OnPluginStart()
 	l4d_ready_enable_sound = CreateConVar("l4d_ready_enable_sound", "1", "Enable sound during countdown & on live");
 	l4d_ready_chuckle = CreateConVar("l4d_ready_chuckle", "1", "Enable chuckle during countdown");
 	l4d_ready_live_sound = CreateConVar("l4d_ready_live_sound", "ui\\survival_medal.wav", "The sound that plays when a round goes live");
-	l4d_ready_enable_oneplayer = CreateConVar("l4d_ready_enable_oneplayer", "0", "Enabling enable readyup to stop the round if there is just one player connected", 0, true, 0.0, true, 1.0);
+	l4d_ready_votepass_oneplayer = CreateConVar("l4d_ready_votepass_oneplayer", "0", "Enabling enable readyup to bypass the vote if there is just one player connected");
+	l4d_ready_vote_oneplayerbyteam = CreateConVar("l4d_ready_vote_oneplayerbyteam", "0", "Enabling enable readyup to start the round if there is just one player by team ready");
+	l4d_ready_vote_percent =  CreateConVar("l4d_ready_vote_percent", "75.0", "Percentage of players vote ready for the round goes live.", 0, true, 0.0,true,100.00);
 	HookConVarChange(l4d_ready_survivor_freeze, SurvFreezeChange);
-	HookConVarChange(l4d_ready_enable_oneplayer, changedConvars);
+	HookConVarChange(l4d_ready_votepass_oneplayer, changedConvars);
+	HookConVarChange(l4d_ready_vote_oneplayerbyteam, changedConvars);
+	HookConVarChange(l4d_ready_vote_percent, changedConvars);
 
 	HookEvent("round_start", RoundStart_Event);
 	HookEvent("player_team", PlayerTeam_Event);
@@ -626,7 +635,9 @@ public void SurvFreezeChange(Handle convar, const char[] oldValue, const char[] 
 
 public void changedConvars(Handle convar, const char[] oldValue, const char[] newValue)
 {
-	g_ienableReadyOnePlayer = GetConVarInt(convar);
+	g_iCvar_VotePassOnePlayer = l4d_ready_votepass_oneplayer.IntValue;
+	g_iCvar_VoteOnePlayerbyTeam= l4d_ready_vote_oneplayerbyteam.IntValue;
+	g_fCvar_VotePercent	=  l4d_ready_vote_percent.FloatValue;
 }
 
 
@@ -764,7 +775,7 @@ void UpdatePanel()
 	}
 	Format(ServerBuffer, sizeof(ServerBuffer), "▸ Bienvenido\n");
 	DrawPanelText(menuPanel, ServerBuffer);
-	if (g_ienableReadyOnePlayer==1)
+	if (g_iCvar_VotePassOnePlayer==1)
 		if (GetSeriousClientCount()==1)
 		{
 			DrawPanelText(menuPanel, "La partida iniciará porque solo hay un jugador presente.");
@@ -1023,6 +1034,7 @@ bool CheckFullReady()
 {
 	int readyCount = 0;
 	int casterCount = 0;
+	float total=0.0;
 	for (int client = 1; client <= MaxClients; client++)
 	{
 		if (IsClientInGame(client))
@@ -1034,11 +1046,19 @@ bool CheckFullReady()
 
 			if (IsPlayer(client))
 			{
+				total += 1.0;
 				if (isPlayerReady[client]) readyCount++;
 			}
 		}
 	}
 	
+	
+	float perc = float(readyCount) / total * 100.0;
+	//PrintToChatAll("perc %f",perc);
+	if( perc >= g_fCvar_VotePercent )
+	{
+		return true;	
+	}
 	
 	// Non-Versus Mode!
 	//if we're running a versus game,
@@ -1049,6 +1069,11 @@ bool CheckFullReady()
 		return readyCount >= GetRealClientCount();
 	}
 	// Players vs Players
+	if (g_iCvar_VoteOnePlayerbyTeam==1)
+	{
+		if ((GetRealClientCount()>=1) && (GetSIClientCount()>=1))
+			return true;
+	}
 	return readyCount >= (GetRealClientCount() + GetSIClientCount()); // + casterCount
 }
 
